@@ -1,0 +1,346 @@
+name: Advanced Checks
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'packages/**'
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build packages
+        run: yarn build
+        
+      - name: Check bundle size
+        run: |
+          echo "Analyzing bundle sizes..."
+          for package_dir in packages/*/dist; do
+            if [ -d "$package_dir" ]; then
+              package_name=$(basename $(dirname "$package_dir"))
+              echo "📦 $package_name bundle analysis:"
+              total_size=$(du -sh "$package_dir" | cut -f1)
+              echo "  Total size: $total_size"
+              echo "  Largest files:"
+              find "$package_dir" -name "*.js" -exec ls -lh {} \; | sort -k5 -hr | head -5 | awk '{print "    " $9 " - " $5}'
+              echo ""
+            fi
+          done
+        
+      - name: Check for TODO/FIXME comments
+        run: |
+          echo "Checking for TODO/FIXME comments..."
+          todo_count=$(find packages -name "*.ts" -o -name "*.js" | xargs grep -n "TODO\|FIXME\|XXX\|HACK" || true)
+          if [ -n "$todo_count" ]; then
+            echo "⚠️  Found TODO/FIXME comments:"
+            echo "$todo_count"
+          else
+            echo "✅ No TODO/FIXME comments found"
+          fi
+          
+      - name: Check for console.log statements
+        run: |
+          echo "Checking for console.log statements in production code..."
+          
+          console_logs=$(find packages -name "*.ts" -path "*/src/*" | xargs grep -n "console\.log\|console\.warn\|console\.error" | grep -v "// allowed" || true)
+          
+          if [ -n "$console_logs" ]; then
+            echo "⚠️  Found console statements in production code:"
+            echo "$console_logs"
+            echo ""
+            echo "Consider using proper logging or removing these statements"
+          else
+            echo "✅ No console statements found in production code"
+          fi
+
+  dependency-analysis:
+    name: Dependency Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Analyze dependency tree
+        run: |
+          echo "Analyzing dependency tree..."
+          
+          # Check for duplicate dependencies
+          echo "Checking for potential duplicate dependencies..."
+          yarn why axios || true
+          yarn why typescript || true
+          
+          # List all dependencies
+          echo "Root dependencies:"
+          yarn list --depth=0
+          
+      - name: Check for outdated dependencies
+        run: |
+          echo "Checking for outdated dependencies..."
+          yarn outdated || echo "Some dependencies might be outdated"
+          
+      - name: License compliance check
+        run: |
+          echo "Checking license compliance..."
+          
+          # Basic license check
+          if command -v npx &> /dev/null; then
+            npx license-checker --summary || echo "License checker not available"
+          fi
+          
+          # Check for common problematic licenses
+          echo "Scanning for potentially problematic licenses..."
+          yarn licenses list | grep -i "gpl\|agpl\|copyleft" || echo "No problematic licenses found"
+
+  performance-check:
+    name: Performance Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build with timing
+        run: |
+          echo "Measuring build performance..."
+          
+          start_time=$(date +%s)
+          yarn build
+          end_time=$(date +%s)
+          
+          build_time=$((end_time - start_time))
+          echo "⏱️  Total build time: ${build_time} seconds"
+          
+          if [ $build_time -gt 60 ]; then
+            echo "⚠️  Build time is longer than 1 minute"
+          else
+            echo "✅ Build time is acceptable"
+          fi
+          
+      - name: Check TypeScript compilation performance
+        run: |
+          echo "Measuring TypeScript compilation performance..."
+          
+          for package_dir in packages/*/; do
+            if [ -f "${package_dir}tsconfig.json" ]; then
+              package_name=$(basename "$package_dir")
+              echo "Checking $package_name compilation time..."
+              
+              cd "$package_dir"
+              start_time=$(date +%s)
+              npx tsc --noEmit --diagnostics 2>&1 | grep -E "Files:|Version:|Time:" || true
+              end_time=$(date +%s)
+              
+              compile_time=$((end_time - start_time))
+              echo "$package_name compilation time: ${compile_time} seconds"
+              cd - > /dev/null
+            fi
+          done
+
+  documentation-quality:
+    name: Documentation Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check documentation completeness
+        run: |
+          echo "Analyzing documentation quality..."
+          
+          # Check README completeness
+          for readme in packages/*/README.md; do
+            if [ -f "$readme" ]; then
+              package_name=$(basename $(dirname "$readme"))
+              echo "📖 Checking $package_name README..."
+              
+              # Check for essential sections
+              if grep -q "## Installation" "$readme"; then
+                echo "  ✅ Has Installation section"
+              else
+                echo "  ⚠️  Missing Installation section"
+              fi
+              
+              if grep -q "## Usage" "$readme" || grep -q "## Example" "$readme"; then
+                echo "  ✅ Has Usage/Example section"
+              else
+                echo "  ⚠️  Missing Usage/Example section"
+              fi
+              
+              if grep -q "## API" "$readme" || grep -q "## Documentation" "$readme"; then
+                echo "  ✅ Has API/Documentation section"
+              else
+                echo "  ⚠️  Missing API/Documentation section"
+              fi
+              
+              # Check length
+              word_count=$(wc -w < "$readme")
+              if [ "$word_count" -gt 100 ]; then
+                echo "  ✅ README has good length ($word_count words)"
+              else
+                echo "  ⚠️  README might be too short ($word_count words)"
+              fi
+            fi
+          done
+          
+      - name: Check code comments coverage
+        run: |
+          echo "Checking code documentation coverage..."
+          
+          for src_dir in packages/*/src; do
+            if [ -d "$src_dir" ]; then
+              package_name=$(basename $(dirname "$src_dir"))
+              echo "📝 Checking $package_name code comments..."
+              
+              # Count functions vs documented functions (basic check)
+              total_functions=$(find "$src_dir" -name "*.ts" | xargs grep -E "^[[:space:]]*(export[[:space:]]+)?(async[[:space:]]+)?function|^[[:space:]]*(export[[:space:]]+)?class" | wc -l)
+              documented_functions=$(find "$src_dir" -name "*.ts" | xargs grep -B1 -E "^[[:space:]]*(export[[:space:]]+)?(async[[:space:]]+)?function|^[[:space:]]*(export[[:space:]]+)?class" | grep -E "^\s*\*|^\s*//" | wc -l)
+              
+              if [ "$total_functions" -gt 0 ]; then
+                coverage=$((documented_functions * 100 / total_functions))
+                echo "  Functions found: $total_functions"
+                echo "  Documented: $documented_functions"
+                echo "  Coverage: ~${coverage}%"
+                
+                if [ "$coverage" -gt 50 ]; then
+                  echo "  ✅ Good documentation coverage"
+                else
+                  echo "  ⚠️  Consider adding more code comments"
+                fi
+              fi
+            fi
+          done
+
+  compatibility-check:
+    name: Compatibility Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [16, 18, 20, 22]
+    continue-on-error: true
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Test build compatibility
+        run: |
+          echo "Testing build compatibility with Node.js ${{ matrix.node-version }}"
+          yarn build
+          
+      - name: Test runtime compatibility
+        run: |
+          echo "Testing runtime compatibility..."
+          
+          # Test alexa-nodejs package can be required
+          cd packages/alexa-nodejs
+          node -e "
+            try {
+              const lib = require('./dist/index.js');
+              console.log('✅ alexa-nodejs loads successfully');
+              console.log('Available exports:', Object.keys(lib));
+            } catch (err) {
+              console.error('❌ Failed to load alexa-nodejs:', err.message);
+              process.exit(1);
+            }
+          "
+
+  summary:
+    name: Advanced Checks Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, dependency-analysis, performance-check, documentation-quality, compatibility-check]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 🔍 Advanced Checks Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check job results
+          if [ "${{ needs.code-quality.result }}" = "success" ]; then
+            echo "✅ **Code Quality**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Code Quality**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.dependency-analysis.result }}" = "success" ]; then
+            echo "✅ **Dependency Analysis**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Dependency Analysis**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.performance-check.result }}" = "success" ]; then
+            echo "✅ **Performance Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Performance Check**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.documentation-quality.result }}" = "success" ]; then
+            echo "✅ **Documentation Quality**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Documentation Quality**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.compatibility-check.result }}" = "success" ]; then
+            echo "✅ **Compatibility Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Compatibility Check**: Some versions failed (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **Note**: Advanced checks provide additional insights but don't block PRs." >> $GITHUB_STEP_SUMMARY 

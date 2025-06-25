@@ -1,0 +1,137 @@
+{
+  "name": "Alexa Control Example",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0e7b2ad5-3b3e-4b96-b7e4-3b2a4e7c5f3d",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getDevices"
+      },
+      "id": "1e8c3ae6-4c4f-5c07-c8f5-4c3b5f8d6g4e",
+      "name": "Get Alexa Devices",
+      "type": "alexa",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "alexaApi": {
+          "id": "alexa-credentials-id",
+          "name": "Alexa API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendTTS",
+        "deviceSerial": "={{ $json.devices[0].serialNumber }}",
+        "message": "Hello from n8n! Your device list has been retrieved successfully.",
+        "queueDelay": 1.5
+      },
+      "id": "2f9d4bf7-5d5g-6d18-d9g6-5d4c6g9e7h5f",
+      "name": "Send Welcome TTS",
+      "type": "alexa",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "alexaApi": {
+          "id": "alexa-credentials-id", 
+          "name": "Alexa API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAnnouncement",
+        "message": "This is a test announcement from your n8n workflow!",
+        "title": "n8n Automation",
+        "announcementMethod": "all"
+      },
+      "id": "3g0e5ch8-6e6h-7e29-e0h7-6e5d7h0f8i6g",
+      "name": "Send Announcement",
+      "type": "alexa",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "alexaApi": {
+          "id": "alexa-credentials-id",
+          "name": "Alexa API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "setVolume",
+        "deviceSerial": "={{ $json.devices[0].serialNumber }}",
+        "volume": 30,
+        "queueDelay": 2
+      },
+      "id": "4h1f6di9-7f7i-8f3a-f1i8-7f6e8i1g9j7h",
+      "name": "Set Volume",
+      "type": "alexa",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "alexaApi": {
+          "id": "alexa-credentials-id",
+          "name": "Alexa API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Get Alexa Devices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Alexa Devices": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome TTS": {
+      "main": [
+        [
+          {
+            "node": "Send Announcement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Announcement": {
+      "main": [
+        [
+          {
+            "node": "Set Volume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+} 

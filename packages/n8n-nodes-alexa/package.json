@@ -1,0 +1,60 @@
+{
+  "name": "n8n-nodes-alexa",
+  "version": "1.0.0",
+  "description": "n8n custom node for Amazon Alexa device control using alexa-nodejs library",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist",
+    "package": "npm pack",
+    "prepublishOnly": "yarn clean && yarn build"
+  },
+  "keywords": [
+    "n8n",
+    "n8n-community-node-package",
+    "alexa",
+    "amazon",
+    "echo",
+    "smart-home",
+    "automation"
+  ],
+  "author": "Migrated from AlexaPy",
+  "license": "Apache-2.0",
+  "files": [
+    "dist/**/*",
+    "credentials/**/*",
+    "nodes/**/*"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/AlexaApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Alexa/Alexa.node.js"
+    ]
+  },
+  "dependencies": {
+    "alexa-nodejs": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.9",
+    "n8n-workflow": "^1.40.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.2.2"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-repo/alexa-nodejs.git",
+    "directory": "packages/n8n-nodes-alexa"
+  },
+  "bugs": {
+    "url": "https://github.com/your-repo/alexa-nodejs/issues"
+  },
+  "homepage": "https://github.com/your-repo/alexa-nodejs#readme"
+}

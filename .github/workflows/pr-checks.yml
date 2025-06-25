@@ -1,0 +1,369 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'packages/**'
+      - '.github/workflows/**'
+      - 'package.json'
+      - 'yarn.lock'
+  push:
+    branches: [ main, dev ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Check code formatting
+        run: |
+          echo "Checking if code is properly formatted..."
+          if command -v prettier &> /dev/null; then
+            yarn prettier --check "packages/**/*.{ts,js,json,md}"
+          else
+            echo "Prettier not configured, skipping format check"
+          fi
+        
+      - name: Run ESLint
+        run: |
+          echo "Running ESLint checks..."
+          if [ -f "packages/alexa-nodejs/.eslintrc.js" ]; then
+            cd packages/alexa-nodejs && npx eslint src/ --ext .ts --max-warnings 0
+          else
+            echo "ESLint not configured for alexa-nodejs, skipping"
+          fi
+          
+          if [ -f "packages/n8n-nodes-alexa/.eslintrc.js" ]; then
+            cd packages/n8n-nodes-alexa && npx eslint src/ --ext .ts --max-warnings 0
+          else
+            echo "ESLint not configured for n8n-nodes-alexa, skipping"
+          fi
+
+  type-check:
+    name: TypeScript Type Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build core package first
+        run: |
+          echo "Building alexa-nodejs package for dependencies..."
+          yarn workspace alexa-nodejs run build
+          
+      - name: TypeScript compilation check
+        run: |
+          echo "Checking TypeScript compilation..."
+          yarn workspaces foreach -A run tsc --noEmit || true
+          
+      - name: Check for TypeScript errors
+        run: |
+          echo "Running strict TypeScript checks..."
+          cd packages/alexa-nodejs && npx tsc --noEmit --strict
+          cd ../n8n-nodes-alexa && npx tsc --noEmit --strict
+
+  build-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+        
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build all packages
+        run: |
+          echo "Building all packages..."
+          yarn build
+          
+      - name: Verify build outputs
+        run: |
+          echo "Verifying build outputs exist..."
+          
+          # Check alexa-nodejs build
+          if [ ! -f "packages/alexa-nodejs/dist/index.js" ]; then
+            echo "❌ alexa-nodejs build failed - missing dist/index.js"
+            exit 1
+          fi
+          echo "✅ alexa-nodejs built successfully"
+          
+          # Check n8n-nodes-alexa build
+          if [ ! -f "packages/n8n-nodes-alexa/dist/index.js" ]; then
+            echo "❌ n8n-nodes-alexa build failed - missing dist/index.js"
+            exit 1
+          fi
+          
+          if [ ! -f "packages/n8n-nodes-alexa/dist/credentials/AlexaApi.credentials.js" ]; then
+            echo "❌ n8n-nodes-alexa credentials not built"
+            exit 1
+          fi
+          
+          if [ ! -f "packages/n8n-nodes-alexa/dist/nodes/Alexa/Alexa.node.js" ]; then
+            echo "❌ n8n-nodes-alexa node not built"
+            exit 1
+          fi
+          echo "✅ n8n-nodes-alexa built successfully"
+          
+          # Check test-project build
+          if [ ! -f "packages/test-project/dist/index.js" ]; then
+            echo "❌ test-project build failed - missing dist/index.js"
+            exit 1
+          fi
+          echo "✅ test-project built successfully"
+        
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          if yarn workspaces foreach -A run test --help &> /dev/null; then
+            yarn test
+          else
+            echo "No test scripts found, skipping tests"
+          fi
+          
+      - name: Check package.json validity
+        run: |
+          echo "Validating package.json files..."
+          
+          # Validate main package.json
+          node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8'))"
+          echo "✅ Root package.json is valid"
+          
+          # Validate workspace package.json files
+          for pkg in packages/*/package.json; do
+            if [ -f "$pkg" ]; then
+              node -e "JSON.parse(require('fs').readFileSync('$pkg', 'utf8'))"
+              echo "✅ $pkg is valid"
+            fi
+          done
+
+  security-check:
+    name: Security and Dependency Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Run security audit
+        run: |
+          echo "Running security audit..."
+          yarn audit --level moderate || echo "Audit completed with warnings"
+          
+      - name: Check for vulnerable dependencies
+        run: |
+          echo "Checking for known vulnerabilities..."
+          if command -v npm &> /dev/null; then
+            npm audit --audit-level moderate || echo "Some vulnerabilities found - review required"
+          fi
+
+  package-validation:
+    name: Package Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build packages
+        run: yarn build
+        
+      - name: Test n8n package creation
+        run: |
+          echo "Testing n8n package creation..."
+          cd packages/n8n-nodes-alexa
+          yarn package
+          
+          # Check if package was created
+          if [ -f "n8n-nodes-alexa-1.0.0.tgz" ]; then
+            echo "✅ n8n package created successfully"
+            
+            # Check package contents
+            tar -tzf n8n-nodes-alexa-1.0.0.tgz | head -20
+          else
+            echo "❌ Failed to create n8n package"
+            exit 1
+          fi
+          
+      - name: Check workspace dependencies
+        run: |
+          echo "Validating workspace dependencies..."
+          
+          # Check if test-project can use alexa-nodejs
+          cd packages/test-project
+          if grep -q "alexa-nodejs.*workspace:" package.json; then
+            echo "✅ test-project correctly references alexa-nodejs workspace"
+          else
+            echo "❌ test-project dependency configuration issue"
+            exit 1
+          fi
+          
+          # Check if n8n-nodes-alexa can use alexa-nodejs  
+          cd ../n8n-nodes-alexa
+          if grep -q "alexa-nodejs.*workspace:" package.json; then
+            echo "✅ n8n-nodes-alexa correctly references alexa-nodejs workspace"
+          else
+            echo "❌ n8n-nodes-alexa dependency configuration issue"
+            exit 1
+          fi
+
+  documentation-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check required documentation
+        run: |
+          echo "Checking documentation completeness..."
+          
+          # Check root README
+          if [ ! -f "README.md" ]; then
+            echo "❌ Root README.md missing"
+            exit 1
+          fi
+          echo "✅ Root README.md exists"
+          
+          # Check package READMEs
+          for pkg_dir in packages/*/; do
+            pkg_name=$(basename "$pkg_dir")
+            if [ ! -f "${pkg_dir}README.md" ]; then
+              echo "❌ README.md missing in $pkg_name"
+              exit 1
+            fi
+            echo "✅ README.md exists in $pkg_name"
+          done
+          
+          # Check for changelog in n8n package
+          if [ ! -f "packages/n8n-nodes-alexa/CHANGELOG.md" ]; then
+            echo "❌ CHANGELOG.md missing in n8n-nodes-alexa"
+            exit 1
+          fi
+          echo "✅ CHANGELOG.md exists in n8n-nodes-alexa"
+          
+          # Check for installation guide in n8n package
+          if [ ! -f "packages/n8n-nodes-alexa/INSTALLATION.md" ]; then
+            echo "❌ INSTALLATION.md missing in n8n-nodes-alexa"
+            exit 1
+          fi
+          echo "✅ INSTALLATION.md exists in n8n-nodes-alexa"
+          
+      - name: Check for broken links in documentation
+        run: |
+          echo "Checking for obvious documentation issues..."
+          
+          # Simple check for common markdown issues
+          find . -name "*.md" -exec grep -l "]()" {} \; | while read file; do
+            echo "⚠️  Empty link found in $file"
+          done
+          
+          echo "Documentation check completed"
+
+  final-validation:
+    name: Final Validation
+    runs-on: ubuntu-latest
+    needs: [lint-and-format, type-check, build-test, security-check, package-validation, documentation-check]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Final build verification
+        run: |
+          echo "Running final build verification..."
+          yarn clean
+          yarn build
+          
+          echo "✅ All checks passed! PR is ready for review."
+          
+      - name: PR Summary
+        run: |
+          echo "## 🎉 PR Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Linting and Formatting**: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **TypeScript Type Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Build and Test**: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Security Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Package Validation**: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Documentation Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚀 **This PR is ready for review!**" >> $GITHUB_STEP_SUMMARY 

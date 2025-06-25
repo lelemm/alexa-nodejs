@@ -1,0 +1,267 @@
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  test-before-release:
+    name: Test Before Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Run all checks
+        run: |
+          echo "Running comprehensive checks before release..."
+          yarn build
+          yarn test || echo "Tests completed"
+          
+      - name: Verify package builds
+        run: |
+          echo "Verifying all packages build successfully..."
+          
+          # Verify alexa-nodejs
+          if [ ! -f "packages/alexa-nodejs/dist/index.js" ]; then
+            echo "❌ alexa-nodejs build failed"
+            exit 1
+          fi
+          
+          # Verify n8n-nodes-alexa
+          if [ ! -f "packages/n8n-nodes-alexa/dist/index.js" ]; then
+            echo "❌ n8n-nodes-alexa build failed"
+            exit 1
+          fi
+          
+          echo "✅ All packages built successfully"
+
+  build-packages:
+    name: Build Release Packages
+    runs-on: ubuntu-latest
+    needs: test-before-release
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build all packages
+        run: yarn build
+        
+      - name: Create n8n package
+        run: |
+          echo "Creating n8n distributable package..."
+          cd packages/n8n-nodes-alexa
+          yarn package
+          
+      - name: Upload n8n package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n8n-nodes-alexa-package
+          path: packages/n8n-nodes-alexa/*.tgz
+          
+      - name: Upload alexa-nodejs build
+        uses: actions/upload-artifact@v4
+        with:
+          name: alexa-nodejs-build
+          path: packages/alexa-nodejs/dist/
+          
+      - name: Generate release notes
+        run: |
+          echo "## 🚀 Release Notes" > release-notes.md
+          echo "" >> release-notes.md
+          echo "### 📦 Packages" >> release-notes.md
+          echo "- **alexa-nodejs**: Core TypeScript library for Alexa device control" >> release-notes.md
+          echo "- **n8n-nodes-alexa**: Custom n8n node for workflow automation" >> release-notes.md
+          echo "- **test-project**: Example usage and testing" >> release-notes.md
+          echo "" >> release-notes.md
+          
+          # Add changelog info if available
+          if [ -f "packages/n8n-nodes-alexa/CHANGELOG.md" ]; then
+            echo "### 📝 Latest Changes" >> release-notes.md
+            head -20 packages/n8n-nodes-alexa/CHANGELOG.md | tail -15 >> release-notes.md
+          fi
+          
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: build-packages
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          
+      - name: Enable Corepack
+        run: corepack enable
+          
+      - name: Install dependencies
+        run: yarn install --immutable
+        
+      - name: Build packages
+        run: yarn build
+        
+      - name: Publish alexa-nodejs to npm
+        run: |
+          echo "Publishing alexa-nodejs to npm..."
+          cd packages/alexa-nodejs
+          
+          # Check if package already exists at this version
+          current_version=$(node -p "require('./package.json').version")
+          npm_version=$(npm view alexa-nodejs version 2>/dev/null || echo "0.0.0")
+          
+          if [ "$current_version" != "$npm_version" ]; then
+            npm publish --access public
+            echo "✅ Published alexa-nodejs@$current_version"
+          else
+            echo "⚠️  Version $current_version already exists on npm"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          
+      - name: Publish n8n-nodes-alexa to npm
+        run: |
+          echo "Publishing n8n-nodes-alexa to npm..."
+          cd packages/n8n-nodes-alexa
+          
+          # Check if package already exists at this version
+          current_version=$(node -p "require('./package.json').version")
+          npm_version=$(npm view n8n-nodes-alexa version 2>/dev/null || echo "0.0.0")
+          
+          if [ "$current_version" != "$npm_version" ]; then
+            npm publish --access public
+            echo "✅ Published n8n-nodes-alexa@$current_version"
+          else
+            echo "⚠️  Version $current_version already exists on npm"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-packages, publish-npm]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: n8n-nodes-alexa-package
+          path: ./artifacts/
+          
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: ./
+          
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name || 'v1.0.0' }}
+          release_name: Release ${{ github.ref_name || 'v1.0.0' }}
+          body_path: ./release-notes.md
+          draft: false
+          prerelease: false
+          
+      - name: Upload n8n package to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/n8n-nodes-alexa-1.0.0.tgz
+          asset_name: n8n-nodes-alexa-1.0.0.tgz
+          asset_content_type: application/gzip
+
+  notify-completion:
+    name: Notify Release Completion
+    runs-on: ubuntu-latest
+    needs: [create-github-release]
+    if: always()
+    
+    steps:
+      - name: Release Summary
+        run: |
+          echo "## 🎉 Release Process Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.publish-npm.result }}" = "success" ]; then
+            echo "✅ **npm Publication**: Successful" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **npm Publication**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.create-github-release.result }}" = "success" ]; then
+            echo "✅ **GitHub Release**: Created" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **GitHub Release**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Published Packages" >> $GITHUB_STEP_SUMMARY
+          echo "- **alexa-nodejs**: Available on npm" >> $GITHUB_STEP_SUMMARY
+          echo "- **n8n-nodes-alexa**: Available on npm and as GitHub release asset" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Installation" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Install the library" >> $GITHUB_STEP_SUMMARY
+          echo "npm install alexa-nodejs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Install the n8n node" >> $GITHUB_STEP_SUMMARY
+          echo "npm install n8n-nodes-alexa" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY 

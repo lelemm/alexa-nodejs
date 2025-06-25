@@ -1,0 +1,46 @@
+{
+  "name": "alexa-nodejs-workspace",
+  "version": "1.0.0",
+  "description": "Node.js/TypeScript library for controlling Amazon Alexa devices programmatically - Workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces foreach -A run build",
+    "build:lib": "yarn workspace alexa-nodejs run build",
+    "build:test": "yarn workspace @alexa-nodejs/test-project run build",
+    "build:n8n": "yarn workspace n8n-nodes-alexa run build",
+    "dev:lib": "yarn workspace alexa-nodejs run dev",
+    "dev:test": "yarn workspace @alexa-nodejs/test-project run dev",
+    "dev:n8n": "yarn workspace n8n-nodes-alexa run dev",
+    "clean": "yarn workspaces foreach -A run clean",
+    "test": "yarn workspaces foreach -A run test",
+    "lint": "yarn workspaces foreach -A run lint",
+    "lint:fix": "yarn workspaces foreach -A run lint:fix",
+    "package:n8n": "yarn workspace n8n-nodes-alexa run package"
+  },
+  "keywords": [
+    "alexa",
+    "amazon",
+    "echo",
+    "smart-home",
+    "typescript",
+    "nodejs",
+    "workspace"
+  ],
+  "author": "Migrated from AlexaPy",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "rimraf": "^5.0.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-repo/alexa-nodejs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-repo/alexa-nodejs/issues"
+  },
+  "homepage": "https://github.com/your-repo/alexa-nodejs#readme",
+  "packageManager": "yarn@4.9.1+sha512.f95ce356460e05be48d66401c1ae64ef84d163dd689964962c6888a9810865e39097a5e9de748876c2e0bf89b232d583c33982773e9903ae7a76257270986538"
+}
